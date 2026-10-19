@@ -7,6 +7,10 @@ Changes in sphinx-automodapi
 - Added the ``automodapi_inheritance_private_bases`` configuration option
   to omit private base classes from the inheritance diagrams. [#248]
 
+- If ``automodapi_inheritance_private_bases`` is ``False``, private base
+  classes are also replaced by their nearest public ancestors in the base
+  classes listed on the class pages. [#248]
+
 - Without the ``:private-bases:`` option, ``automod-diagram`` now replaces
   each private base class by its nearest public ancestors instead of dropping
   the inheritance through it. [#248]

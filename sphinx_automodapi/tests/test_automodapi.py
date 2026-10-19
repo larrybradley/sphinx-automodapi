@@ -1,6 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
 import pickle
+import re
 from copy import copy
 
 import pytest
@@ -131,6 +132,13 @@ def test_am_replacer_private_bases(tmpdir, private_bases):
 
 
 
+PRIVATE_CHAIN = 'sphinx_automodapi.tests.example_module.private_chain'
+
+# The private classes have no documentation for the links to them to resolve
+PRIVATE_CHAIN_NITPICK_IGNORE = [('py:class', f'{PRIVATE_CHAIN}._Mixin'),
+                                ('py:class', f'{PRIVATE_CHAIN}._Helper')]
+
+
 @pytest.mark.parametrize('private_bases', [True, False])
 def test_am_replacer_private_bases_chain(tmpdir, private_bases):
     """
@@ -143,11 +151,9 @@ def test_am_replacer_private_bases_chain(tmpdir, private_bases):
         f.write('.. automodapi:: '
                 'sphinx_automodapi.tests.example_module.private_chain\n')
 
-    # The private class has no documentation for the links to it to resolve
-    mixin = 'sphinx_automodapi.tests.example_module.private_chain._Mixin'
     run_sphinx_in_tmpdir(tmpdir, additional_conf={
         'automodapi_inheritance_private_bases': private_bases,
-        'nitpick_ignore': [('py:class', mixin)]})
+        'nitpick_ignore': PRIVATE_CHAIN_NITPICK_IGNORE})
 
     doctree_path = tmpdir.join('_build', 'html', '.doctrees', 'index.doctree')
     with open(doctree_path.strpath, 'rb') as f:
@@ -155,16 +161,52 @@ def test_am_replacer_private_bases_chain(tmpdir, private_bases):
     (diagram,) = doctree.findall(inheritance_diagram)
     bases = {name: set(base_names)
              for name, _, base_names, _ in diagram['graph'].class_info}
-    targets = {xref['reftarget'] for xref in diagram.findall(pending_xref)}
+    targets = {xref['reftarget'].split('.')[-1]
+               for xref in diagram.findall(pending_xref)}
 
     if private_bases:
-        assert bases == {'Base': set(), '_Mixin': {'Base'},
-                         'MyClass': {'_Mixin'}, 'Other': {'Base'}}
-        assert mixin in targets
+        assert bases == {'Base': set(), '_Mixin': {'Base'}, '_Helper': set(),
+                         'MyClass': {'_Mixin'}, 'Other': {'Base'},
+                         'Combined': {'_Helper', 'Base'}, 'Solo': {'_Helper'}}
+        assert {'_Mixin', '_Helper'} <= targets
     else:
-        assert bases == {'Base': set(), 'MyClass': {'Base'},
-                         'Other': {'Base'}}
-        assert mixin not in targets
+        assert bases == {'Base': set(), 'MyClass': {'Base'}, 'Other': {'Base'},
+                         'Combined': {'Base'}, 'Solo': set()}
+        assert not {'_Mixin', '_Helper'} & targets
+
+
+@pytest.mark.parametrize('private_bases', [True, False])
+def test_am_replacer_private_bases_show_inheritance(tmpdir, private_bases):
+    """
+    Tests that a hidden private base class is replaced by its nearest public
+    ancestors in the list of base classes shown on the class pages
+    """
+
+    with open(tmpdir.join('index.rst').strpath, 'w') as f:
+        f.write('.. automodapi:: '
+                'sphinx_automodapi.tests.example_module.private_chain\n')
+
+    run_sphinx_in_tmpdir(tmpdir, additional_conf={
+        'automodapi_inheritance_private_bases': private_bases,
+        'nitpick_ignore': PRIVATE_CHAIN_NITPICK_IGNORE})
+
+    shown_bases = {}
+    for name in ('MyClass', 'Other', 'Combined', 'Solo'):
+        path = tmpdir.join('_build', 'html', 'api',
+                           f'{PRIVATE_CHAIN}.{name}.html')
+        with open(path.strpath) as f:
+            html = f.read()
+        bases_text = re.search(r'Bases:(.*?)</p>', html, re.DOTALL).group(1)
+        shown_bases[name] = re.sub(r'<[^>]+>', '', bases_text).split(', ')
+        shown_bases[name] = [base.strip() for base in shown_bases[name]]
+
+    if private_bases:
+        assert shown_bases == {'MyClass': ['_Mixin'], 'Other': ['Base'],
+                               'Combined': ['_Helper', 'Base'],
+                               'Solo': ['_Helper']}
+    else:
+        assert shown_bases == {'MyClass': ['Base'], 'Other': ['Base'],
+                               'Combined': ['Base'], 'Solo': ['object']}
 
 
 am_replacer_noinh_expected = """
