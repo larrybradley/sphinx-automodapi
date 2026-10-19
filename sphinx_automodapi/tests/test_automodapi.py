@@ -1,9 +1,12 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+import pickle
 from copy import copy
 
 import pytest
 from docutils.parsers.rst import directives, roles
+from sphinx.addnodes import pending_xref
+from sphinx.ext.inheritance_diagram import inheritance_diagram
 
 from . import cython_testpackage  # noqa
 from .helpers import run_sphinx_in_tmpdir
@@ -103,6 +106,65 @@ def test_am_replacer_writereprocessed(tmpdir, writereprocessed):
     run_sphinx_in_tmpdir(tmpdir, additional_conf={'automodapi_writereprocessed': writereprocessed})
 
     assert tmpdir.join('index.rst.automodapi').isfile() is writereprocessed
+
+
+
+@pytest.mark.parametrize('private_bases', [True, False])
+def test_am_replacer_private_bases(tmpdir, private_bases):
+    """
+    Tests the automodapi_inheritance_private_bases option
+    """
+
+    with open(tmpdir.join('index.rst').strpath, 'w') as f:
+        f.write(am_replacer_str.format(options=''))
+
+    run_sphinx_in_tmpdir(tmpdir, additional_conf={
+        'automodapi_inheritance_private_bases': private_bases})
+
+    with open(tmpdir.join('index.rst.automodapi').strpath) as f:
+        result = f.read()
+
+    expected = am_replacer_basic_expected
+    if not private_bases:
+        expected = expected.replace('    :private-bases:\n', '')
+    assert result == expected
+
+
+
+@pytest.mark.parametrize('private_bases', [True, False])
+def test_am_replacer_private_bases_chain(tmpdir, private_bases):
+    """
+    Tests that a hidden private base class is replaced by its nearest public
+    ancestors in the inheritance diagram, so that the inheritance through the
+    private class is kept
+    """
+
+    with open(tmpdir.join('index.rst').strpath, 'w') as f:
+        f.write('.. automodapi:: '
+                'sphinx_automodapi.tests.example_module.private_chain\n')
+
+    # The private class has no documentation for the links to it to resolve
+    mixin = 'sphinx_automodapi.tests.example_module.private_chain._Mixin'
+    run_sphinx_in_tmpdir(tmpdir, additional_conf={
+        'automodapi_inheritance_private_bases': private_bases,
+        'nitpick_ignore': [('py:class', mixin)]})
+
+    doctree_path = tmpdir.join('_build', 'html', '.doctrees', 'index.doctree')
+    with open(doctree_path.strpath, 'rb') as f:
+        doctree = pickle.load(f)
+    (diagram,) = doctree.findall(inheritance_diagram)
+    bases = {name: set(base_names)
+             for name, _, base_names, _ in diagram['graph'].class_info}
+    targets = {xref['reftarget'] for xref in diagram.findall(pending_xref)}
+
+    if private_bases:
+        assert bases == {'Base': set(), '_Mixin': {'Base'},
+                         'MyClass': {'_Mixin'}, 'Other': {'Base'}}
+        assert mixin in targets
+    else:
+        assert bases == {'Base': set(), 'MyClass': {'Base'},
+                         'Other': {'Base'}}
+        assert mixin not in targets
 
 
 am_replacer_noinh_expected = """

@@ -73,13 +73,21 @@ It accepts the following options:
         using `dir`, which always gives a sorted list).
 
 
-This extension also adds five sphinx configuration options:
+This extension also adds the following sphinx configuration options:
 
 * ``automodapi_inheritance_diagram``
     Should be a boolean that indicates whether to show inheritance diagrams
     by default. This can be overriden on a case by case basis with
     ``:inheritance-diagram:`` and ``:no-inheritance-diagram:``. Defaults to
     ``True``.
+
+* ``automodapi_inheritance_private_bases``
+    Should be a boolean that indicates whether to include private base
+    classes (those whose names start with an underscore) in the inheritance
+    diagrams. If ``False``, each private base class is replaced by its
+    nearest public ancestors, which keeps implementation details such as
+    private mixin classes out of the diagrams without losing the inheritance
+    through them. Defaults to ``True``.
 
 * ``automodapi_toctreedirnm``
     This must be a string that specifies the name of the directory the
@@ -170,7 +178,7 @@ Class Inheritance Diagram
 {clsinhsechds}
 
 .. automod-diagram:: {modname}
-    :private-bases:
+    {privatebases}
     :parts: 1
     {allowedpkgnms}
     {skip}
@@ -386,9 +394,14 @@ def automodapi_replace(sourcestr, app, dotoctree=True, docname=None,
                     clsskip = ':skip: ' + ','.join(toskip)
                 else:
                     clsskip = ''
+                if app.config.automodapi_inheritance_private_bases:
+                    privatebases = ':private-bases:'
+                else:
+                    privatebases = ''
                 diagram_entry = automod_templ_inh.format(
                     modname=modnm,
                     clsinhsechds=h2 * 25,
+                    privatebases=privatebases,
                     allowedpkgnms=allowedpkgnms,
                     skip=clsskip)
                 diagram_entry = diagram_entry.replace('    \n', '')
@@ -474,6 +487,7 @@ def setup(app):
     app.connect('source-read', process_automodapi)
 
     app.add_config_value('automodapi_inheritance_diagram', True, True)
+    app.add_config_value('automodapi_inheritance_private_bases', True, True)
     app.add_config_value('automodapi_toctreedirnm', 'api', True)
     app.add_config_value('automodapi_writereprocessed', False, True)
 

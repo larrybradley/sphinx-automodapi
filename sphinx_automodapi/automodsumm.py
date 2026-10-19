@@ -93,6 +93,11 @@ This directive will produce an inheritance diagram like that of the
 This directive requires a single argument that must be a module or
 package. It accepts no options.
 
+Unless the ``:private-bases:`` option of the `sphinx.ext.inheritance_diagram`_
+extension is given, private base classes (those whose names start with an
+underscore) are not shown. Each private base class is instead replaced by its
+nearest public ancestors, so that the inheritance through it is kept.
+
 .. note::
     Like 'inheritance-diagram', 'automod-diagram' requires
     `graphviz <http://www.graphviz.org/>`_ to generate the inheritance diagram.
@@ -110,7 +115,9 @@ from docutils.parsers.rst.directives import flag
 from packaging.version import Version
 from sphinx.util import logging
 from sphinx.ext.autosummary import Autosummary
-from sphinx.ext.inheritance_diagram import InheritanceDiagram, InheritanceGraph, try_import
+from sphinx.addnodes import pending_xref
+from sphinx.ext.inheritance_diagram import (InheritanceDiagram, InheritanceGraph,
+                                            inheritance_diagram, try_import)
 
 from .utils import find_mod_objs, cleanup_whitespace, SPHINX_LT_9
 
@@ -254,13 +261,69 @@ class Automoddiagram(InheritanceDiagram):
             if inspect.isclass(o):
                 clsnms.append(n)
 
+        # Without the private-bases option, the graph is built with the
+        # private base classes so that they can be replaced below by their
+        # nearest public ancestors. Otherwise, the inheritance through a
+        # private class would be lost.
+        hide_private_bases = 'private-bases' not in self.options
+
         oldargs = self.arguments
         try:
             if len(clsnms) > 0:
                 self.arguments = [' '.join(clsnms)]
-            return InheritanceDiagram.run(self)
+            if hide_private_bases:
+                self.options['private-bases'] = None
+            result = InheritanceDiagram.run(self)
         finally:
             self.arguments = oldargs
+            if hide_private_bases:
+                del self.options['private-bases']
+
+        if hide_private_bases:
+            for node in result:
+                for diagram in node.findall(inheritance_diagram):
+                    _hide_private_classes(diagram)
+
+        return result
+
+
+def _is_private_class(fullname):
+    """
+    Return whether the class with the given full name is private.
+    """
+    return fullname.split('.')[-1].startswith('_')
+
+
+def _hide_private_classes(diagram):
+    """
+    Remove the private classes from an inheritance diagram.
+
+    Each private class is replaced in the base classes of its subclasses by its
+    nearest public ancestors, so that the inheritance through the private class
+    is kept. The links to the private classes are also removed.
+    """
+    graph = diagram['graph']
+    bases = {name: class_bases for name, _, class_bases, _ in graph.class_info}
+    private = {name for name, fullname, _, _ in graph.class_info
+               if _is_private_class(fullname)}
+
+    def public_bases(names):
+        result = []
+        for name in names:
+            replacements = public_bases(bases[name]) if name in private else [name]
+            for base in replacements:
+                if base not in result:
+                    result.append(base)
+        return result
+
+    graph.class_info = [
+        (name, fullname, tuple(public_bases(class_bases)), tooltip)
+        for name, fullname, class_bases, tooltip in graph.class_info
+        if name not in private]
+
+    for xref in list(diagram.findall(pending_xref)):
+        if _is_private_class(xref['reftarget']):
+            xref.parent.remove(xref)
 
 
 # sphinx.ext.inheritance_diagram generates a list of class full names and
